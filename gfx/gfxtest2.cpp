@@ -1,63 +1,21 @@
 #include <iostream>
-#include <stdint.h>				//uint16_t
+#include <stdint.h>				// uint16_t
 #include <conio.h>				// x86 in/out operations
-#include <i86.h>
+#include <i86.h>				// interrupts
 #include <time.h>
+#include "gfxlib.cpp"
 
-#define VIDEO_ADDRESS_START					0xa0000000
-#define BYTES_PER_ROW						2048			
-#define BYTES_PER_PIXEL						2
-#define VGA_REG								0x00a0
-#define COLOR_RED							0xF800
-#define COLOR_GREEN							0x07E0
-#define COLOR_BLUE							0x001F
-#define TEST_WIDTH							256
-#define TEST_HEIGTH							256
+#define TEST_WIDTH							64
+#define TEST_HEIGTH							64
 
 using namespace std;
 
 extern "C" uint16_t __cdecl add2Nums(uint16_t num1, uint16_t num2);
-extern "C" void vga_swap_frame();
-extern "C" void __cdecl vga_draw_pixel(uint16_t x, uint16_t y, uint16_t color);
-extern "C" void vga_draw_pixel_fast(uint16_t color, uint16_t y, uint16_t x);
-extern "C" void vga_draw_pixel_faster(uint16_t color, uint16_t y, uint16_t x);
-
-static inline void write_word_far(uintptr_t addr, uint16_t value)
-{
-	*(volatile uint16_t*)addr = value;
-}
-
-void SwapFrame()
-{
-	vga_swap_frame();
-
-	//loop until vsync
-	do
-	{
-	} while (inpw(VGA_REG) & 0x8000);
-
-}
-void ClearScreen()
-{
-	union REGPACK regs;
-	memset(&regs, 0, sizeof(union REGPACK));
-	regs.w.ax = 0x0600;		// ah = 6 (scroll), al = 0 = clear screen
-	intr(0x10, &regs);
-}
-void SetSegment(uint16_t y)
-{
-	uint16_t currentRegister = inpw(VGA_REG);
-	uint16_t currentSegment = currentRegister & 0x000f;								// read current register from video card
-	uint16_t newSegment = ((y & 0x01e0) >> 5);
-	if (currentSegment != newSegment)
-	{
-		outpw(VGA_REG, (currentRegister & 0xfff0) | newSegment);
-	}
-}
+Graphics gfx;
 
 void test_int()
 {
-	ClearScreen();
+	gfx.ClearScreen();
 	for (uint16_t y = 0; y < TEST_HEIGTH; y++)
 	{
 		for (uint16_t x = 0; x < TEST_WIDTH; x++)
@@ -75,7 +33,7 @@ void test_int()
 }
 void test_asm_c()
 {
-	ClearScreen();
+	gfx.ClearScreen();
 	for (uint16_t y = 0; y < TEST_HEIGTH; y++)
 	{
 		for (uint16_t x = 0; x < TEST_WIDTH; x++)
@@ -87,7 +45,7 @@ void test_asm_c()
 }
 void test_asm_watcomc()
 {
-	ClearScreen();
+	gfx.ClearScreen();
 	for (uint16_t y = 0; y < TEST_HEIGTH; y++)
 	{
 		for (uint16_t x = 0; x < TEST_WIDTH; x++)
@@ -99,24 +57,24 @@ void test_asm_watcomc()
 }
 void test_asm_watcomc_nocalls()
 {
-	ClearScreen();
+	gfx.ClearScreen();
 	for (uint16_t y = 0; y < TEST_HEIGTH; y++)
 	{
 		for (uint16_t x = 0; x < TEST_WIDTH; x++)
 		{
 			uint16_t color = (x + y) * 58;
-			vga_draw_pixel_faster(color, x, y);
+			vga_draw_pixel_faster(x, y, color);
 		}
 	}
 }
 void test_direct_cpp()
 {
-	ClearScreen();
+	gfx.ClearScreen();
 	for (uint16_t y = 0; y < TEST_HEIGTH; y++)
 	{
 		for (uint16_t x = 0; x < TEST_WIDTH; x++)
 		{
-			SetSegment(y);
+			gfx.SetSegment(y);
 			uint16_t color = (x + y) * 58;
 			uintptr_t addr = VIDEO_ADDRESS_START + (BYTES_PER_ROW * (y)) + (BYTES_PER_PIXEL * x);
 			write_word_far(addr, color);
@@ -140,37 +98,89 @@ int main() {
 
 	start_time1 = clock();
 	test_int();
-	SwapFrame();
+	gfx.SwapFrame();
 	end_time1 = clock();
 
 	start_time2 = clock();
 	test_asm_c();
-	SwapFrame();
+	gfx.SwapFrame();
 	end_time2 = clock();
 
 	start_time3 = clock();
 	test_asm_watcomc();
-	SwapFrame();
+	gfx.SwapFrame();
 	end_time3 = clock();
 
 	start_time4 = clock();
 	test_asm_watcomc_nocalls();
-	SwapFrame();
+	gfx.SwapFrame();
 	end_time4 = clock();
 
 	start_time5 = clock();
 	test_direct_cpp();
-	SwapFrame();
+	gfx.SwapFrame();
 	end_time5 = clock();
 
-	ClearScreen();
+	gfx.ClearScreen();
 	cout << "results...\n\n";
 
 	cout << "interrupt                              >>>   duration:  " << end_time1 - start_time1 << " ms\n";
 	cout << "asm c calling conv                     >>>   duration:  " << end_time2 - start_time2 << " ms\n";
 	cout << "asm watc calling conv                  >>>   duration:  " << end_time3 - start_time3 << " ms\n";
 	cout << "asm watc calling conv no subcalls      >>>   duration:  " << end_time4 - start_time4 << " ms\n";
-	cout << "c++ direct                             >>>   duration:  " << end_time5 - start_time5 << " ms\n\n\n";
+	cout << "c++ direct                             >>>   duration:  " << end_time5 - start_time5 << " ms\n\n";
+
+
+	gfx.DisableKeyboardCursor();
+
+	uint16_t startY = 90;
+	for (int i = 20; i < WIDTH_PIXELS; i += 10)
+	{
+		gfx.DrawRectangle(i, startY, i + 5, startY + i / 10, i * 100);
+		gfx.SwapFrame();
+		gfx.DrawRectangle(i, startY, i + 5, startY + i / 10, i * 100);
+	}
+
+	startY += 50;
+	for (int i = 20; i < WIDTH_PIXELS; i += 10)
+	{
+		gfx.DrawRectangleFilled(i, startY, i + 5, startY + i / 10, i * 100);
+		gfx.SwapFrame();
+		gfx.DrawRectangleFilled(i, startY, i + 5, startY + i / 10, i * 100);
+	}
+
+	startY += 80;
+	for (int i = 20; i < WIDTH_PIXELS; i += 10)
+	{
+		gfx.DrawCircle(i, startY, i / 30, i * 100);
+		gfx.SwapFrame();
+		gfx.DrawCircle(i, startY, i / 30, i * 100);
+	}
+
+	startY += 30;
+	for (int i = 20; i < WIDTH_PIXELS; i += 10)
+	{
+		gfx.DrawCircleFilled(i, startY, i / 30, i * 100);
+		gfx.SwapFrame();
+		gfx.DrawCircleFilled(i, startY, i / 30, i * 100);
+	}
+
+	startY += 50;
+	for (int i = 20; i < WIDTH_PIXELS; i += 20)
+	{
+		gfx.DrawEllipse(i, startY, i / 30, i / 20, i * 50);
+		gfx.SwapFrame();
+		gfx.DrawEllipse(i, startY, i / 30, i / 20, i * 50);
+	}
+
+	for (int i = 5; i < WIDTH_PIXELS; i += 10)
+	{
+		gfx.DrawLineBres(i, 340, WIDTH_PIXELS - i, 440, i * 100);
+		gfx.SwapFrame();
+		gfx.DrawLineBres(i, 340, WIDTH_PIXELS - i, 440, i * 100);
+	}
+
+	gfx.SetCursorPosition(0, 450);
 
 	return 0;
 }

@@ -223,16 +223,18 @@ vga_draw_pixel_faster_:
 	; params:		(3 params in registers - param order right to left, with register order: AX, DX, BX, CX
 	;				*old base pointer				= bp
 	;				*return address					= bp+2
-	;				[in]		x position			= bx
+
+	;				old[in]		x position			= bx
+	;				old[in]		y position			= dx
+	;				old[in]		color				= ax
+
+	;				[in]		x position			= ax
 	;				[in]		y position			= dx
-	;				[in]		color				= ax
+	;				[in]		color				= bx
 	;				[return]	none
 
     %stacksize	large							; tell NASM to use bp
 
-	push	bp									; save base pointer
-	mov		bp,				sp					; update base pointer to current stack pointer
-	
 	push	ax
 	push	bx
 	push	dx
@@ -254,24 +256,20 @@ vga_draw_pixel_faster_:
 		pop		ax
 
 
-	;mov		bx,				[x]					; pass x position in bx (y already be in dx)
 	;call	vga_get_pixel_mem_addr				; get address within selected 64K VRAM segment, returned in bx
 	;inline below
-		;push	ax
-		;push	dx
 		and		dx,			0b00000000_00011111
 		shl		dx,			11							; the lower 5 y bits correspond with the line number within VRAM segment
-		shl		bx,			1							; each x position = 2 bytes, so double bx
-		or		bx,			dx							; yyyyyxxx_xxxxxxxx = address within VRAM 64K segment
-		;pop		dx
-		;pop		ax
+		shl		ax,			1							; each x position = 2 bytes, so double bx
+		or		ax,			dx							; yyyyyxxx_xxxxxxxx = address within VRAM 64K segment
 
 
 	mov		si,				0xa000
 	mov		es,				si
 	
 	;mov		ax,				[color]				; fill pixel with color
-	mov		word es:[bx],	ax					; fill pixel with color
+	mov		si,				ax
+	mov		word es:[si],	bx					; fill pixel with color
 	
 	pop		es
 	pop		si
@@ -279,6 +277,270 @@ vga_draw_pixel_faster_:
 	pop		bx
 	pop		ax
 	
-	mov		sp,		bp
-	pop		bp
 	ret
+
+
+
+
+
+
+; ******************* !!!!! ********************************************************
+; the following procedures were copied over from old BIOS code and need to be updated for calling convention, etc.
+
+vga_draw_circle:
+	; description:	draws an unfilled circle at position x,y with given radius and color
+	; params:		[in]	dx = x coordinate of circle center
+	;				[in]	di = y coordinate of circle center
+	;				[in]	bx = radius
+	;				[in]	ax = color
+	;				[out]	none
+	; notes:		adapted from http://computer-programming-forum.com/45-asm/67a67818aff8a94a.htm
+
+	; TO DO save / return state properly!
+
+	push	es		; to restore es as end of routine
+
+	push	0xa000	; set es to video memory
+    pop		es
+
+	mov		bp,		0			; x coordinate
+    mov     si,		bx			; y coordinate
+
+	.c00:        
+		call	.8pixels            ; Set 8 pixels
+		sub     bx,			bp		; D=D-X
+		inc     bp                  ; X+1
+		sub     bx,			bp      ; D=D-(2x+1)
+		jg      .c01                ; >> no step for Y
+		add     bx,			si      ; D=D+Y
+		dec     si                  ; Y-1
+		add     bx,			si      ; D=D+(2Y-1)
+	.c01:        
+		cmp     si,			bp      ; Check X>Y
+		jae     .c00                ; >> Need more pixels
+		jmp		.out
+	.8pixels:   
+		call      .4pixels          ; 4 pixels
+	.4pixels:   
+		xchg      bp,		si      ; Swap x and y //   bp as x to bp as y  -and- si as y to si as x
+		call      .2pixels          ; 2 pixels
+	.2pixels:   
+		neg		si
+		push    di
+		push	bp
+		add		di,			si
+		add		bp,			dx
+
+		push	bp					; pixel x
+		push	di					; pixel y
+		push	ax					; pixel color
+		;;;!!!!call	vga_draw_pixel		; pixels for right side of circle
+
+		pop		bp
+		push	dx
+		sub     dx,			bp
+
+		push	dx					; pixel x
+		push	di					; pixel y
+		push	ax					; pixel color
+		;;;!!!!call	vga_draw_pixel		; pixels for left side of circle
+		
+		pop		dx
+		pop     di
+		ret
+	
+	.out:
+		pop		es					; switch es back to whatever it was prior to pointing to video memory
+		ret
+
+vga_draw_circle_filled:
+	; description:	draws an unfilled circle at position x,y with given radius and color
+	; params:		[in]	dx = x coordinate of circle center
+	;				[in]	di = y coordinate of circle center
+	;				[in]	bx = radius
+	;				[in]	ax = color
+	;				[out]	none
+	; notes:		adapted from http://computer-programming-forum.com/45-asm/67a67818aff8a94a.htm
+
+	; TO DO save / return state properly!
+
+	push	es		; to restore es as end of routine
+	
+	push	0xa000	; set es to video memory
+    pop		es
+
+	mov		bp,		0			; x coordinate
+    mov     si,		bx			; y coordinate
+
+	.c00:        
+		call	.8pixels            ; Set 8 pixels
+		sub     bx,			bp		; D=D-X
+		inc     bp                  ; X+1
+		sub     bx,			bp      ; D=D-(2x+1)
+		jg      .c01                ; >> no step for Y
+		add     bx,			si      ; D=D+Y
+		dec     si                  ; Y-1
+		add     bx,			si      ; D=D+(2Y-1)
+	.c01:        
+		cmp     si,			bp      ; Check X>Y
+		jae     .c00                ; >> Need more pixels
+		jmp		.out
+	.8pixels:   
+		call      .4pixels          ; 4 pixels
+	.4pixels:   
+		xchg      bp,		si      ; Swap x and y //   bp as x to bp as y  -and- si as y to si as x
+		call      .2pixels          ; 2 pixels
+	.2pixels:   
+		neg		si
+		push    di
+		push	bp
+		add		di,			si
+		add		bp,			dx
+
+		;push	bp					; pixel x
+		mov		cx,			bp		; rectangle end x
+		;push	di					; pixel y
+		;push	ax					; pixel color
+		;call	vga_draw_pixel		; pixels for right side of circle
+
+		pop		bp
+		push	dx
+		sub     dx,			bp
+
+		;push	dx					; pixel x
+		;push	di					; pixel y
+		;push	ax					; pixel color
+		;call	vga_draw_pixel		; pixels for left side of circle
+		
+		push	dx					; rectangle start x
+		push	di					; rectangle start y & end y
+		push	cx					; rectangle end x
+		push	di					; rectangle start y & end y
+		push	ax					; pixel color
+		call	vga_draw_rect_filled
+		
+		
+		pop		dx
+		pop     di
+		ret
+	
+	.out:
+		pop		es					; switch es back to whatever it was prior to pointing to video memory
+		ret
+
+vga_draw_rect:
+	; description:	draws a  rectangle - *currently start vals must be lower than end vals
+	; params:		(5 params on stack - push params on stack in reverse order of listing below)
+	;				*old base pointer				= bp
+	;				*return address					= bp+2
+	;				[in]		start_x 			= bp+4
+	;				[in]		start_y 			= bp+6
+	;				[in]		end_x				= bp+8
+	;				[in]		end_y 				= bp+10
+	;				[in]		color x				= bp+12
+	;				[return]	none
+	;
+	; TO DO bounds checks
+
+	
+	%push		mycontext        ; save the current context 
+	%stacksize	large            ; tell NASM to use bp
+    %arg		start_x:word, start_y:word, end_x:word, end_y:word, color:word
+	
+	push	bp									; save base pointer
+	mov		bp,				sp					; update base pointer to current stack pointer
+
+	push	ax
+	push	bx
+	push	cx
+	push	dx
+
+	mov		cx,	[end_x]
+	inc		word [end_x]	;[vga_rect_end_x]		; param - number is inclusive of rect - add 1 to support loop code strucure below
+	mov		dx, [end_y]
+	inc		word [end_y] ;[vga_rect_end_y]		; param - number is inclusive of rect - add 1 to support loop code strucure below
+
+	mov		bx,					[start_y]
+	mov		ax,					[start_x]
+	.row:
+		; if x = first or last column, or y = first or last row, then draw pixel
+		cmp		ax,	[start_x]
+		je		.draw_pixel
+		cmp		ax, cx
+		je		.draw_pixel
+		cmp		bx, [start_y]
+		je		.draw_pixel
+		cmp		bx, dx
+		je		.draw_pixel
+
+		jmp		.skip_pixel			; not first or last colomn or row, so skip this pixel
+
+		.draw_pixel:
+		push	ax					; push x position to stack (param for vga_draw_pixel)
+		push	bx					; push y position to stack (param for vga_draw_pixel)
+		push	word [color]				; push color to stack (param for vga_draw_pixel)
+		;;;!!!!call	vga_draw_pixel
+		
+		.skip_pixel:
+		inc		ax										; move right a pixel
+		cmp		ax,					[end_x]				; compare current x to end of row of rectangle
+		jne		.row
+	mov		ax,					[start_x]					; start over on x position
+	inc		bx											; move down a pixel
+	cmp		bx,					[end_y]					; compare current y to end of column of rectangle
+	jne		.row
+
+	pop		dx
+	pop		cx
+	pop		bx
+	pop		ax
+	
+	pop		bp		;or 'leave'
+	
+	ret		10					; return, pop 10 bytes for 5 params off stack
+	%pop
+
+vga_draw_rect_filled:
+	; description:	draws a filled rectangle - *currently start vals must be lower than end vals
+	; params:		(5 params on stack - push params on stack in reverse order of listing below)
+	;				*old base pointer				= bp
+	;				*return address					= bp+2
+	;				[in]		color				= bp+4
+	;				[in]		end y				= bp+6
+	;				[in]		end x				= bp+8
+	;				[in]		start y				= bp+10
+	;				[in]		start x				= bp+12
+	;				[return]	none
+	;
+	; TO DO bounds checks
+
+	push	bp									; save base pointer
+	mov		bp,				sp					; update base pointer to current stack pointer
+
+	push	ax
+	push	bx
+	
+	inc		word [bp+8]	;[vga_rect_end_x]		; param - number is inclusive of rect - add 1 to support loop code strucure below
+	inc		word [bp+6] ;[vga_rect_end_y]		; param - number is inclusive of rect - add 1 to support loop code strucure below
+
+	mov		bx,					[bp+10]
+	mov		ax,					[bp+12]
+	.row:
+		push	ax					; push x position to stack (param for vga_draw_pixel)
+		push	bx					; push y position to stack (param for vga_draw_pixel)
+		push	word [bp+4]				; push color to stack (param for vga_draw_pixel)
+		;;;!!!!call	vga_draw_pixel
+		inc		ax										; move right a pixel
+		cmp		ax,					[bp+8]				; compare current x to end of row of rectangle
+		jne		.row
+	mov		ax,					[bp+12]					; start over on x position
+	inc		bx											; move down a pixel
+	cmp		bx,					[bp+6]					; compare current y to end of column of rectangle
+	jne		.row
+
+	pop		bx
+	pop		ax
+
+	pop		bp
+	ret		10					; return, pop 10 bytes for 5 params off stack
+
