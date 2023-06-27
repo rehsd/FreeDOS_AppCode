@@ -1,0 +1,12 @@
+@echo off
+echo Open Watcom Build Environment
+PATH D:\WATCOM\BINNT64;D:\WATCOM\BINNT;%PATH%
+SET INCLUDE=D:\WATCOM\H;D:\WATCOM\H\NT;D:\WATCOM\H\NT\DIRECTX;D:\WATCOM\H\NT\DDK
+SET WATCOM=D:\WATCOM
+SET EDPATH=D:\WATCOM\EDDAT
+SET WHTMLHELP=D:\WATCOM\BINNT\HELP
+SET WIPFC=D:\WATCOM\WIPFC
+
+@echo on
+wcl -2 -mc -zp8 -fpi87 -fp2 gfxtest2.cpp graphics.obj
+copy gfxtest2.exe d:\dos\
