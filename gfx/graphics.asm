@@ -13,6 +13,9 @@
 ;	Registers AX, BX, CX and DX, and segment register ES aren't saved and restored when a call is made.
 ;
 
+; To do
+;	-function to take pointer to sprite and write it to a video address
+
 %include "macros.asm"
 
 cpu			286
@@ -138,7 +141,7 @@ global vga_draw_pixel_fast_
 vga_draw_pixel_fast_:
 	; calling conv: WATCOM_C (registers filled, followed by stack)
 	; description:	draws a pixel at x,y pixel position with specified 2-byte color
-	; params:		(3 params in registers - param order right to left, with register order: AX, DX, BX, CX
+	; params:		3 params in registers - param order right to left, with register order: AX, DX, BX, CX
 	;				*old base pointer				= bp
 	;				*return address					= bp+2
 	;				[in]		x position			= bx
@@ -219,15 +222,11 @@ vga_get_pixel_mem_addr:
 
 global vga_draw_pixel_faster_
 vga_draw_pixel_faster_:
+	; calling conv: WATCOM_C (registers filled, followed by stack)
 	; description:	draws a pixel at x,y pixel position with specified 2-byte color
-	; params:		(3 params in registers - param order right to left, with register order: AX, DX, BX, CX
+	; params:		(3 params in registers, with register order: AX, DX, BX, CX
 	;				*old base pointer				= bp
 	;				*return address					= bp+2
-
-	;				old[in]		x position			= bx
-	;				old[in]		y position			= dx
-	;				old[in]		color				= ax
-
 	;				[in]		x position			= ax
 	;				[in]		y position			= dx
 	;				[in]		color				= bx
@@ -279,29 +278,182 @@ vga_draw_pixel_faster_:
 	
 	ret
 
+global _vga_draw_rect_filled
+_vga_draw_rect_filled:
+	; calling conv: C (stack)
+	; to do: change over to WATCOMC calling convention for performance improvement
+	; description:	draws a filled rectangle - *currently start vals must be lower than end vals
+	; params:		5 params on stack
+	;				*old base pointer				= bp
+	;				*return address					= bp+2
+	;				[in]		start x				= bp+4
+	;				[in]		start y				= bp+6
+	;				[in]		end x				= bp+8
+	;				[in]		end y				= bp+10
+	;				[in]		color				= bp+12
+	; TO DO bounds checks
 
+	%stacksize	large							; tell NASM to use bp
+    %arg		startx:word, starty:word, endx:word, endy:word, color:word
 
+	push	bp									; save base pointer
+	mov		bp,				sp					; update base pointer to current stack pointer
 
+	push	ax
+	push	dx
+	push	bx
 
+	
+	inc		word [endx]				; param - number is inclusive of rect - add 1 to support loop code strucure below
+	inc		word [endy]				; param - number is inclusive of rect - add 1 to support loop code strucure below
 
-; ******************* !!!!! ********************************************************
-; the following procedures were copied over from old BIOS code and need to be updated for calling convention, etc.
+	mov		bx,	[color]
+	mov		dx,	[starty]
+	mov		ax,	[startx]
+	.row:
+		call	vga_draw_pixel_faster_					; ax=x,dx=y,bx=color
+		inc		ax										; move right a pixel
+		cmp		ax,					[endx]				; compare current x to end of row of rectangle
+		jne		.row
+	mov		ax,					[startx]					; start over on x position
+	inc		dx											; move down a pixel
+	cmp		dx,					[endy]					; compare current y to end of column of rectangle
+	jne		.row
 
-vga_draw_circle:
+	pop		bx
+	pop		dx
+	pop		ax
+	
+	mov		sp,		bp
+	pop		bp
+	ret		; for c++ calls, don't need to pop -- caller must pop params off stack!
+
+global vga_draw_circle_filled_
+vga_draw_circle_filled_:
+	; calling conv: WATCOMC (registers filled, followed by stack)
+	; param order right to left, with register order: AX, DX, BX, CX
+	; description:	draws a filled circle at position x,y with given radius and color
+	; oldparams:	[in]	dx = x coordinate of circle center
+	;				[in]	di = y coordinate of circle center
+	;				[in]	bx = radius
+	;				[in]	ax = color
+	; params:		[in]	ax = x coordinate of circle center
+	;				[in]	dx = y coordinate of circle center
+	;				[in]	bx = radius
+	;				[in]	cx = color
+	;				[out]	none
+	; notes:		adapted from http://computer-programming-forum.com/45-asm/67a67818aff8a94a.htm
+	; lots of clean-up and optimization needed here when time permits
+
+	push	ax
+	push	bx
+	push	cx
+	push	dx
+	push	di
+	push	si
+	push	es
+	push	bp
+	
+	;/// temporary shuffling to support updated params using WATCOMC calling conv -- need to rework procedure to get rid of this
+	push	ax
+	push	dx
+	push	cx
+	pop		ax
+	pop		di
+	pop		dx
+	;///
+
+	mov		bp,		0			; x coordinate
+    mov     si,		bx			; y coordinate
+
+	.c00:        
+		call	.8pixels            ; Set 8 pixels
+		sub     bx,			bp		; D=D-X
+		inc     bp                  ; X+1
+		sub     bx,			bp      ; D=D-(2x+1)
+		jg      .c01                ; >> no step for Y
+		add     bx,			si      ; D=D+Y
+		dec     si                  ; Y-1
+		add     bx,			si      ; D=D+(2Y-1)
+	.c01:        
+		cmp     si,			bp      ; Check X>Y
+		jae     .c00                ; >> Need more pixels
+		jmp		.out
+	.8pixels:   
+		call      .4pixels          ; 4 pixels
+	.4pixels:   
+		xchg      bp,		si      ; Swap x and y //   bp as x to bp as y  -and- si as y to si as x
+		call      .2pixels          ; 2 pixels
+	.2pixels:   
+		neg		si
+		push    di
+		push	bp
+		add		di,			si			; rectangle start & end y
+		add		bp,			dx
+
+		mov		cx,			bp			; rectangle end x
+		pop		bp
+		push	dx
+		sub     dx,			bp			; rectangle start x
+
+		push	ax						; pixel color
+		push	di						; rectangle end y (also = start y)
+		push	cx						; rectangle end x
+		push	di						; rectangle start y (alse = end y)
+		push	dx						; rectangle start x
+		call	_vga_draw_rect_filled	; params on stack, reverse order
+		add		sp,		10				; as caller, need to pop 5 params off stack
+		
+		pop		dx
+		pop     di
+		ret
+	
+	.out:
+		pop		bp
+		pop		es
+		pop		si
+		pop		di
+		pop		dx
+		pop		cx
+		pop		bx
+		pop		ax
+
+		ret
+
+global vga_draw_circle_
+vga_draw_circle_:
+	; calling conv: WATCOMC (registers filled, followed by stack)
 	; description:	draws an unfilled circle at position x,y with given radius and color
 	; params:		[in]	dx = x coordinate of circle center
 	;				[in]	di = y coordinate of circle center
 	;				[in]	bx = radius
 	;				[in]	ax = color
 	;				[out]	none
+	; params:		[in]	ax = x coordinate of circle center
+	;				[in]	dx = y coordinate of circle center
+	;				[in]	bx = radius
+	;				[in]	cx = color
+	;				[out]	none
 	; notes:		adapted from http://computer-programming-forum.com/45-asm/67a67818aff8a94a.htm
+	; lots of clean-up and optimization needed here when time permits
 
-	; TO DO save / return state properly!
+	push	ax
+	push	bx
+	push	cx
+	push	dx
+	push	di
+	push	si
+	push	es
+	push	bp
 
-	push	es		; to restore es as end of routine
-
-	push	0xa000	; set es to video memory
-    pop		es
+	;/// temporary shuffling to support updated params using WATCOMC calling conv -- need to rework procedure to get rid of this
+	push	ax
+	push	dx
+	push	cx
+	pop		ax
+	pop		di
+	pop		dx
+	;///
 
 	mov		bp,		0			; x coordinate
     mov     si,		bx			; y coordinate
@@ -331,104 +483,41 @@ vga_draw_circle:
 		add		di,			si
 		add		bp,			dx
 
+		push	ax					; pixel color
+		push	di					; pixel y
 		push	bp					; pixel x
-		push	di					; pixel y
-		push	ax					; pixel color
-		;;;!!!!call	vga_draw_pixel		; pixels for right side of circle
+		call	_vga_draw_pixel		; pixels for right side of circle
+		add		sp,			6		; pop 6 bytes from stack
 
 		pop		bp
 		push	dx
 		sub     dx,			bp
 
+		push	ax					; pixel color
+		push	di					; pixel y
 		push	dx					; pixel x
-		push	di					; pixel y
-		push	ax					; pixel color
-		;;;!!!!call	vga_draw_pixel		; pixels for left side of circle
+		call	_vga_draw_pixel		; pixels for left side of circle
+		add		sp,			6		; pop 6 bytes from stack
 		
 		pop		dx
 		pop     di
 		ret
 	
 	.out:
-		pop		es					; switch es back to whatever it was prior to pointing to video memory
-		ret
-
-vga_draw_circle_filled:
-	; description:	draws an unfilled circle at position x,y with given radius and color
-	; params:		[in]	dx = x coordinate of circle center
-	;				[in]	di = y coordinate of circle center
-	;				[in]	bx = radius
-	;				[in]	ax = color
-	;				[out]	none
-	; notes:		adapted from http://computer-programming-forum.com/45-asm/67a67818aff8a94a.htm
-
-	; TO DO save / return state properly!
-
-	push	es		; to restore es as end of routine
-	
-	push	0xa000	; set es to video memory
-    pop		es
-
-	mov		bp,		0			; x coordinate
-    mov     si,		bx			; y coordinate
-
-	.c00:        
-		call	.8pixels            ; Set 8 pixels
-		sub     bx,			bp		; D=D-X
-		inc     bp                  ; X+1
-		sub     bx,			bp      ; D=D-(2x+1)
-		jg      .c01                ; >> no step for Y
-		add     bx,			si      ; D=D+Y
-		dec     si                  ; Y-1
-		add     bx,			si      ; D=D+(2Y-1)
-	.c01:        
-		cmp     si,			bp      ; Check X>Y
-		jae     .c00                ; >> Need more pixels
-		jmp		.out
-	.8pixels:   
-		call      .4pixels          ; 4 pixels
-	.4pixels:   
-		xchg      bp,		si      ; Swap x and y //   bp as x to bp as y  -and- si as y to si as x
-		call      .2pixels          ; 2 pixels
-	.2pixels:   
-		neg		si
-		push    di
-		push	bp
-		add		di,			si
-		add		bp,			dx
-
-		;push	bp					; pixel x
-		mov		cx,			bp		; rectangle end x
-		;push	di					; pixel y
-		;push	ax					; pixel color
-		;call	vga_draw_pixel		; pixels for right side of circle
-
 		pop		bp
-		push	dx
-		sub     dx,			bp
-
-		;push	dx					; pixel x
-		;push	di					; pixel y
-		;push	ax					; pixel color
-		;call	vga_draw_pixel		; pixels for left side of circle
-		
-		push	dx					; rectangle start x
-		push	di					; rectangle start y & end y
-		push	cx					; rectangle end x
-		push	di					; rectangle start y & end y
-		push	ax					; pixel color
-		call	vga_draw_rect_filled
-		
-		
+		pop		es
+		pop		si
+		pop		di
 		pop		dx
-		pop     di
-		ret
-	
-	.out:
-		pop		es					; switch es back to whatever it was prior to pointing to video memory
+		pop		cx
+		pop		bx
+		pop		ax
 		ret
 
-vga_draw_rect:
+global _vga_draw_rect
+_vga_draw_rect:
+	; calling conv: C (stack)
+	; to do: change over to WATCOMC calling convention for performance improvement
 	; description:	draws a  rectangle - *currently start vals must be lower than end vals
 	; params:		(5 params on stack - push params on stack in reverse order of listing below)
 	;				*old base pointer				= bp
@@ -442,8 +531,6 @@ vga_draw_rect:
 	;
 	; TO DO bounds checks
 
-	
-	%push		mycontext        ; save the current context 
 	%stacksize	large            ; tell NASM to use bp
     %arg		start_x:word, start_y:word, end_x:word, end_y:word, color:word
 	
@@ -476,10 +563,10 @@ vga_draw_rect:
 		jmp		.skip_pixel			; not first or last colomn or row, so skip this pixel
 
 		.draw_pixel:
-		push	ax					; push x position to stack (param for vga_draw_pixel)
-		push	bx					; push y position to stack (param for vga_draw_pixel)
 		push	word [color]				; push color to stack (param for vga_draw_pixel)
-		;;;!!!!call	vga_draw_pixel
+		push	bx							; push y position to stack (param for vga_draw_pixel)
+		push	ax							; push x position to stack (param for vga_draw_pixel)
+		call	_vga_draw_pixel
 		
 		.skip_pixel:
 		inc		ax										; move right a pixel
@@ -495,52 +582,8 @@ vga_draw_rect:
 	pop		bx
 	pop		ax
 	
+	mov		sp,		bp
 	pop		bp		;or 'leave'
 	
-	ret		10					; return, pop 10 bytes for 5 params off stack
-	%pop
-
-vga_draw_rect_filled:
-	; description:	draws a filled rectangle - *currently start vals must be lower than end vals
-	; params:		(5 params on stack - push params on stack in reverse order of listing below)
-	;				*old base pointer				= bp
-	;				*return address					= bp+2
-	;				[in]		color				= bp+4
-	;				[in]		end y				= bp+6
-	;				[in]		end x				= bp+8
-	;				[in]		start y				= bp+10
-	;				[in]		start x				= bp+12
-	;				[return]	none
-	;
-	; TO DO bounds checks
-
-	push	bp									; save base pointer
-	mov		bp,				sp					; update base pointer to current stack pointer
-
-	push	ax
-	push	bx
-	
-	inc		word [bp+8]	;[vga_rect_end_x]		; param - number is inclusive of rect - add 1 to support loop code strucure below
-	inc		word [bp+6] ;[vga_rect_end_y]		; param - number is inclusive of rect - add 1 to support loop code strucure below
-
-	mov		bx,					[bp+10]
-	mov		ax,					[bp+12]
-	.row:
-		push	ax					; push x position to stack (param for vga_draw_pixel)
-		push	bx					; push y position to stack (param for vga_draw_pixel)
-		push	word [bp+4]				; push color to stack (param for vga_draw_pixel)
-		;;;!!!!call	vga_draw_pixel
-		inc		ax										; move right a pixel
-		cmp		ax,					[bp+8]				; compare current x to end of row of rectangle
-		jne		.row
-	mov		ax,					[bp+12]					; start over on x position
-	inc		bx											; move down a pixel
-	cmp		bx,					[bp+6]					; compare current y to end of column of rectangle
-	jne		.row
-
-	pop		bx
-	pop		ax
-
-	pop		bp
-	ret		10					; return, pop 10 bytes for 5 params off stack
+	ret		; for c++ calls, don't need to pop -- caller must pop params off stack!
 

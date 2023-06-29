@@ -1,3 +1,57 @@
+// Comments:	General opportunities for improvement:
+//					-Shift functionality to ASM, called from C++ with WATCOMC calling convention
+//					-Reduce CALLs (embed code in primary ASM procedure)
+//					-Move calcs from inner nested loops to out loops or outside of loops, if possible
+//					-Move blocks instead of pixels (e.g., sprite operations)			
+// 
+// 
+// 
+// Queued updates (thanks, Will!)
+		// split DrawPixel() into two functions:
+			//class Graphics {
+			//public:
+			//	// Given that BYTES_PER_ROW % 65536 == 0, we can set the segment and calculate
+			//	// a base pointer once per row.
+			//	static inline void SetRow(uint16_t y) {
+			//		if (currentRowY == y) {
+			//			return;
+			//		}
+			//
+			//		SetSegment(y);
+			//		rowPtr = VIDEO_ADDRESS_START + (BYTES_PER_ROW * y);
+			//	}
+			//
+			//	static inline void DrawPixelInRow(uint16_t x, uint16_t color) {
+			//		write_word_far(rowPtr + (BYTES_PER_PIXEL * x));
+			//	}
+			//
+			//	void DrawPixel(uint16_t x, uint16_t y, uint16_t color) {
+			//		SetRow(y);
+			//		DrawPixelInRow(x, color);
+			//	}
+			//
+			//private:
+			//	uint16_t rowY;
+			//	uintptr_t rowPtr;
+			//}
+			//
+			//Calling this DrawPixel() in a loop would be a similar speed to before, but DrawRectangle() and other primitives can call the much faster DrawPixelInRow() instead:
+			//
+			//class Graphics {
+			//public:
+			//	void DrawRectangle(uint16_t start_x, uint16_t start_y, uint16_t end_x, uint16_t end_y, uint16_t color) {
+			//		for (uint16_t y = start_y; y <= end_y; y++) {
+			//			SetRow(y);
+			//			for (uint16_t x = start_x; x <= end_x; x++) {
+			//				DrawPixelInRow(x, color);
+			//			}
+			//		}
+			//	}
+			//}
+
+// 
+// 
+// 
 // References:			-Computer Graphics, C Version (2nd Ed.) -- Hearn & Baker
 //	
 
@@ -28,12 +82,19 @@ extern "C" void vga_swap_frame();
 extern "C" void __cdecl vga_draw_pixel(uint16_t x, uint16_t y, uint16_t color);
 extern "C" void vga_draw_pixel_fast(uint16_t color, uint16_t y, uint16_t x);
 extern "C" void vga_draw_pixel_faster(uint16_t x, uint16_t y, uint16_t color);
+extern "C" void __cdecl vga_draw_rect(uint16_t start_x, uint16_t start_y, uint16_t end_x, uint16_t end_y, uint16_t color);
+extern "C" void __cdecl vga_draw_rect_filled(uint16_t start_x, uint16_t start_y, uint16_t end_x, uint16_t end_y, uint16_t color);
+extern "C" void vga_draw_circle_filled(uint16_t xCenter, uint16_t yCenter, uint16_t radius, uint16_t color);
+extern "C" void vga_draw_circle(uint16_t xCenter, uint16_t yCenter, uint16_t radius, uint16_t color);
 
 static inline void write_word_far(uintptr_t addr, uint16_t value)
 {
 	*(volatile uint16_t*)addr = value;
 }
-
+static inline void DrawPixel(uint16_t x, uint16_t y, uint16_t color)
+{
+	vga_draw_pixel_faster(x, y, color);
+}
 class Graphics
 {
 public:
@@ -41,7 +102,7 @@ public:
 	{
 
 	}
-	void SetCursorPosition(int x, int y)
+	void SetCursorPosition(uint16_t x, uint16_t y)
 	{
 		union REGPACK regs;
 		memset(&regs, 0, sizeof(union REGPACK));
@@ -83,7 +144,6 @@ public:
 		regs.w.ax = 0x0600;		// ah = 6 (scroll), al = 0 = clear screen
 		intr(0x10, &regs);
 	}
-
 	void DrawRectangle(uint16_t start_x, uint16_t start_y, uint16_t end_x, uint16_t end_y, uint16_t color)
 	{
 		for (uint16_t x = start_x; x <= end_x; x++)
@@ -102,6 +162,10 @@ public:
 			//DrawPixel(end_x, y, color, false);
 		}
 	}
+	void DrawRectangleASM(uint16_t start_x, uint16_t start_y, uint16_t end_x, uint16_t end_y, uint16_t color)
+	{
+		vga_draw_rect(start_x, start_y, end_x, end_y, color);
+	}
 	void DrawRectangleFilled(uint16_t start_x, uint16_t start_y, uint16_t end_x, uint16_t end_y, uint16_t color)
 	{
 		for (uint16_t x = start_x; x <= end_x; x++)
@@ -112,6 +176,10 @@ public:
 				//DrawPixel(x, y, color, false);
 			}
 		}
+	}
+	void DrawRectangleFilledASM(uint16_t start_x, uint16_t start_y, uint16_t end_x, uint16_t end_y, uint16_t color)
+	{
+		vga_draw_rect_filled(start_x, start_y, end_x, end_y, color);
 	}
 	bool IsValidXY(uint16_t x, uint16_t y)
 	{
@@ -134,7 +202,7 @@ public:
 			outpw(VGA_REG, (currentRegister & 0xfff0) | newSegment);
 		}
 	}
-	void DrawLine(int xa, int ya, int xb, int yb, uint16_t color)
+	void DrawLine(uint16_t xa, uint16_t ya, uint16_t xb, uint16_t yb, uint16_t color)
 	{
 		//souce: Computer Graphics, Hearn & Baker
 		int dx = xb - xa, dy = yb - ya, steps, k;
@@ -150,17 +218,17 @@ public:
 		xIncrement = dx / (float)steps;
 		yIncrement = dy / (float)steps;
 
-		vga_draw_pixel_faster(ROUND(x), ROUND(y), color);
+		vga_draw_pixel_faster((uint16_t)ROUND(x), (uint16_t)ROUND(y), color);
 		//DrawPixel(ROUND(x), ROUND(y), color, false);
 		for (k = 0; k < steps; k++)
 		{
 			x += xIncrement;
 			y += yIncrement;
-			vga_draw_pixel_faster(ROUND(x), ROUND(y), color);
+			vga_draw_pixel_faster((uint16_t)ROUND(x), (uint16_t)ROUND(y), color);
 			//DrawPixel(ROUND(x), ROUND(y), color, false);
 		}
 	}
-	void DrawLineBres(int x1, int y1, int x2, int y2, uint16_t color)
+	void DrawLineBres(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color)
 	{
 		int x, y, dx, dy, dx1, dy1, px, py, xe, ye, i;
 		dx = x2 - x1;
@@ -248,7 +316,7 @@ public:
 			}
 		}
 	}
-	void DrawCircle(int xCenter, int yCenter, int radius, uint16_t color)
+	void DrawCircle(uint16_t xCenter, uint16_t yCenter, uint16_t radius, uint16_t color)
 	{
 		int x = 0;
 		int y = radius;
@@ -273,9 +341,8 @@ public:
 			CirclePlotPoints(xCenter, yCenter, x, y, color);
 		}
 	}
-	void CirclePlotPoints(int xCenter, int yCenter, int x, int y, uint16_t color)
+	void CirclePlotPoints(uint16_t xCenter, uint16_t yCenter, uint16_t x, uint16_t y, uint16_t color)
 	{
-
 		vga_draw_pixel_faster(xCenter + x, yCenter + y, color);
 		vga_draw_pixel_faster(xCenter - x, yCenter + y, color);
 		vga_draw_pixel_faster(xCenter + x, yCenter - y, color);
@@ -284,17 +351,12 @@ public:
 		vga_draw_pixel_faster(xCenter - y, yCenter + x, color);
 		vga_draw_pixel_faster(xCenter + y, yCenter - x, color);
 		vga_draw_pixel_faster(xCenter - y, yCenter - x, color);
-
-		//DrawPixel(xCenter + x, yCenter + y, color, false);
-		//DrawPixel(xCenter - x, yCenter + y, color, false);
-		//DrawPixel(xCenter + x, yCenter - y, color, false);
-		//DrawPixel(xCenter - x, yCenter - y, color, false);
-		//DrawPixel(xCenter + y, yCenter + x, color, false);
-		//DrawPixel(xCenter - y, yCenter + x, color, false);
-		//DrawPixel(xCenter + y, yCenter - x, color, false);
-		//DrawPixel(xCenter - y, yCenter - x, color, false);
 	}
-	void DrawCircleFilled(int xCenter, int yCenter, int radius, uint16_t color)
+	void DrawCircleASM(uint16_t xCenter, uint16_t yCenter, uint16_t radius, uint16_t color)
+	{
+		vga_draw_circle(xCenter, yCenter, radius, color);
+	}
+	void DrawCircleFilled(uint16_t xCenter, uint16_t yCenter, uint16_t radius, uint16_t color)
 	{
 		// Likely, there's a faster way to do this
 		int height;
@@ -308,6 +370,10 @@ public:
 				//color,DrawPixel(x + xCenter, y + yCenter, color, false);
 			}
 		}
+	}
+	void DrawCircleFilledASM(uint16_t xCenter, uint16_t yCenter, uint16_t radius, uint16_t color)
+	{
+		vga_draw_circle_filled(xCenter, yCenter, radius, color);
 	}
 	void DrawEllipse(int xCenter, int yCenter, int Rx, int Ry, uint16_t color)
 	{
