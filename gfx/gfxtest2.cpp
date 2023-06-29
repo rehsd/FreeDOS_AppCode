@@ -264,21 +264,12 @@ void test_direct_cpp()
 	}
 }
 
-int main() {
+void RunRenderSpeedTest()
+{
 	clock_t start_time1, end_time1, start_time2, end_time2, start_time3, end_time3, start_time4, end_time4, start_time5, end_time5;
-	
-	//cout << "\n Let's add two numbers...\n";
-	//cout << "Enter first number: ";
-	//uint16_t num1, num2;
-	//cin >> num1;
-	//cout << "Enter second number: ";
-	//cin >> num2;
-	//int i = add2Nums(num1, num2);
-	//std::cout << "Result: " << i << "\n";
-
 
 	cout << "Starting benchmark...\n";
-	
+
 	animateSprite();
 
 	start_time1 = clock();
@@ -318,7 +309,7 @@ int main() {
 	cout << "c++ direct                             >>>   duration:  " << end_time5 - start_time5 << " ms\n\n";
 
 	gfx.DisableKeyboardCursor();
-	
+
 	uint16_t startY = 0;
 
 	// ***** rectangles *****
@@ -374,7 +365,7 @@ int main() {
 		gfx.SwapFrame();
 		gfx.DrawCircleASM(i, startY, i / 20, i * 50);
 	}
-	
+
 	// ***** filled circles *****
 	//startY += 30;
 	//for (int i = 20; i < WIDTH_PIXELS; i += 20)
@@ -411,6 +402,52 @@ int main() {
 	}
 
 	gfx.SetCursorPosition(0, 450);
+}
+void LoadTestImage()
+{
+	const char* fileToOpen = "c:\\rehsd\\frog7.img";
+	printf("Loading image %s...\n", fileToOpen);
+	gfx.LoadImageToScreen(fileToOpen);
+	gfx.ClearScreen();
+}
+
+int main() {
+	char selection;
+	//Display menu
+	printf("Loading...\n");
+	gfx.ClearScreen();
+	do
+	{
+		printf("Welcome to the test utilty for graphics!\n\n");
+		printf("1) Basic Rendering / Speed Test\n");
+		printf("2) Load Test Image\n");
+		printf("Q) Quit\n");
+		printf("\nSelection: ");
+		fflush(stdout);
+		do
+		{
+		} while (!IsKeyPressed());
+		cin >> selection;
+		switch (selection)
+		{
+		case '1':
+			RunRenderSpeedTest();
+			break;
+		case '2':
+			LoadTestImage();
+			break;
+		case 'q':
+			//do nothing, will fall out of do loop
+			break;
+		case 'Q':
+			//do nothing, will fall out of do loop
+			break;
+		default:
+			printf("Invalid Selection\n");
+		}
+	} while (selection != 'Q' || selection == 'q');
+	
+
 
 	return 0;
 }

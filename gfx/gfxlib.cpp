@@ -62,6 +62,10 @@
 #include <math.h>
 #include <iostream.h>			// memset, ...
 #include <stdio.h>	
+#include <string>
+#include <dos.h>
+#include <fcntl.h>
+#include "utility.cpp"
 
 #define ROUND(a) ((int)(a+0.5))
 #define PRINT_CHAR_OPTION_NO_SWAP_FRAME		0x0001		// when set, print_char only prints on inactive VGA frame
@@ -441,6 +445,43 @@ public:
 		//DrawPixel(xCenter - x, yCenter + y, color, false);
 		//DrawPixel(xCenter + x, yCenter - y, color, false);
 		//DrawPixel(xCenter - x, yCenter - y, color, false);
+	}
+
+	void LoadImageToScreen(const char *fileToOpen)
+	{
+		unsigned len_read;
+		int handle;
+		const int bufferSize = WIDTH_PIXELS * 2;		// read one line of 640 pixels, 2 bytes per pixel, at a time
+		auto char buffer[bufferSize];
+
+		if (_dos_open(fileToOpen, O_RDONLY, &handle) != 0) {
+			printf("Unable to open file\n");
+		}
+		else {
+			printf("File successfully opened. Reading...\n");
+			
+			//to do safety checks, error handling - assuming nothing can go wrong for now :)
+			
+			for (int r = 0; r < HEIGHT_PIXELS; r++)
+			{
+				_dos_read(handle, buffer, bufferSize, &len_read);
+
+				if (len_read == bufferSize)
+				{
+					for (int c = 0; c < WIDTH_PIXELS; c++)
+					{
+						uint16_t color = (buffer[(c * 2) + 1] << 8 | buffer[c * 2]);		// stored in Little Endian
+						DrawPixel(c, r, color);
+					}
+				}
+			}
+			_dos_close(handle);
+			SwapFrame();
+			do
+			{
+			} while (!IsKeyPressed());
+			cin.clear();		//discard key
+		}
 	}
 
 	//The following are unused, from Computer Graphics,	Hearn & Baker
